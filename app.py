@@ -60,7 +60,6 @@ def load_assets():
     if os.path.exists(ASSET_FILE):
         try:
             df = pd.read_csv(ASSET_FILE, encoding="utf-8-sig")
-            # 컬럼이 맞지 않거나 비어있으면 기본값으로 리셋
             if not all(col in df.columns for col in ASSET_COLUMNS) or len(df) == 0:
                 raise Exception("Invalid format")
             for col in ASSET_COLUMNS:
@@ -156,8 +155,11 @@ with tab2:
     st.header("🏠 보유 자산 및 부채(대출) 목록 관리")
     st.caption("부동산, 예적금, 주식 등의 자산과 주택담보대출 같은 부채를 자유롭게 추가·수정하고 순자산을 관리하세요.")
 
+    # 인덱스를 깔끔하게 재정렬한 복사본을 에디터에 전달
+    editor_asset_df = st.session_state.assets.copy().reset_index(drop=True)
+
     edited_assets = st.data_editor(
-        st.session_state.assets,
+        editor_asset_df,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
@@ -217,8 +219,10 @@ with tab3:
                 st.error(f"오류 발생: {e}")
 
     st.subheader("✏️ 장부 직접 편집 및 관리")
+    editor_trx_df = st.session_state.transactions.copy().reset_index(drop=True)
+
     edited_trx = st.data_editor(
-        st.session_state.transactions,
+        editor_trx_df,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
