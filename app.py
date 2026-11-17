@@ -177,7 +177,7 @@ with tab2:
             "금액(원)": st.column_config.NumberColumn("금액 (원)", min_value=0, step=100000, format="%d원", required=True),
             "메모": st.column_config.TextColumn("메모 또는 상세 설명"),
         },
-        key="bulletproof_asset_editor_v3"
+        key="bulletproof_asset_editor_v4"
     )
 
     if st.button("💾 자산 변경사항 저장", type="primary"):
@@ -235,7 +235,12 @@ with tab3:
             "내용": st.column_config.TextColumn("내용"),
             "금액": st.column_config.NumberColumn("금액 (원)", min_value=0, step=1000, format="%d원"),
         },
-        key="bulletproof_trx_editor_v3"
+        key="bulletproof_trx_editor_v4"
     )
 
-    if st.button("💾 거래내역 수정사항 저장", type
+    if st.button("💾 거래내역 수정사항 저장", type="primary"):
+        clean_trx = edited_trx.dropna(how="all").copy()
+        clean_trx["날짜"] = clean_trx["날짜"].astype(str)
+        clean_trx["구분"] = clean_trx["구분"].astype(str)
+        clean_trx["카테고리"] = clean_trx["카테고리"].astype(str)
+        clean_trx["내용"] = clean_trx["내용"].astype(
