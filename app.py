@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import json
 import os
+import re
 from google import genai
 
 st.set_page_config(page_title="나만의 AI 재무 비서 & 자산 관리", page_icon="💰", layout="wide")
@@ -181,7 +182,6 @@ with tab3:
         with c1:
             trx_type = st.selectbox("구분", ["지출", "수입"])
         with c2:
-            # 고정비 및 주담대 원리금 관리를 위한 카테고리 추천 제공
             trx_category = st.selectbox("카테고리", ["고정지출(통신/관리비등)", "대출원리금상환(주담대)", "식비", "급여(수입)", "기타"])
         with c3:
             trx_amount = st.number_input("금액 (원)", min_value=0, step=10000, format="%d")
@@ -254,7 +254,6 @@ with tab4:
 
             full_prompt = f"{system_instruction}\n\n사용자 입력: {user_prompt}"
 
-            # 로딩바(Spinner)를 적용하여 체감 속도 및 안정성 개선
             with st.spinner("🧠 AI 재무 비서가 분석 및 답변을 작성 중입니다..."):
                 for attempt in range(3):
                     try:
@@ -272,7 +271,6 @@ with tab4:
                             ai_response = f"API 호출 중 오류 발생: {e}"
 
             if ai_response and "[LOG]" in ai_response:
-                import re
                 logs = re.findall(r"\[LOG\](.*?)\[/LOG\]", ai_response, re.DOTALL)
                 added_count = 0
                 new_rows = []
@@ -295,7 +293,6 @@ with tab4:
                     st.session_state.transactions = pd.concat([st.session_state.transactions, new_df], ignore_index=True).reset_index(drop=True)
                     save_transactions(st.session_state.transactions)
 
-                ai_response = re.sub(r"\[LOG\].*?\[/LOG\]", "", ai_response, flags=root_flag := re.DOTALL).strip() if 're' in globals() else ai_response
                 ai_response = re.sub(r"\[LOG\].*?\[/LOG\]", "", ai_response, flags=re.DOTALL).strip()
                 if added_count > 0:
                     ai_response += f"\n\n✅ **({added_count}건의 내역이 고정비/대출 장부에 자동 반영되었습니다!)**"
