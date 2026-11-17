@@ -5,6 +5,7 @@ import json
 import os
 import re
 from google import genai
+from datetime import datetime
 
 st.set_page_config(page_title="나만의 AI 재무 비서 & 자산 관리", page_icon="💰", layout="wide")
 
@@ -75,8 +76,14 @@ if "assets" not in st.session_state:
 if "saved_api_key" not in st.session_state:
     st.session_state.saved_api_key = load_saved_key()
 
+# 현재 날짜 기준 계산
+now_dt = datetime.now()
+current_date_str = now_dt.strftime("%Y년 %m월 %d일 (%A)")
+
 with st.sidebar:
     st.header("⚙️ 설정 및 요약")
+    st.info(f"📅 오늘 날짜:\n**{current_date_str}**")
+    
     input_key = st.text_input(
         "Gemini API Key를 입력하세요",
         value=st.session_state.saved_api_key,
@@ -101,7 +108,7 @@ with st.sidebar:
     st.metric("총 부채", f"{total_debt:,.0f}원")
 
 st.title("💰 나만의 AI 재무 비서 & 자산 관리 시스템")
-st.write("자산 목록, 고정비, 주택담보대출 원리금, 수입/지출 내역을 통합 관리하고 AI와 대화하세요.")
+st.write(f"현재 기준일: **{current_date_str}** | 자산 수정, 고정비·주담대 관리 및 AI 재무 상담을 통합 제공합니다.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["📊 종합 대시보드", "🏠 자산·부채 관리", "📝 거래내역 & 고정비 관리", "💬 AI 재무 챗봇"])
 
@@ -113,11 +120,29 @@ with tab1:
     expenses = df_trx[df_trx["구분"] == "지출"]["금액"].sum() if not df_trx.empty and "구분" in df_trx.columns else 0
     monthly_flow = incomes - expenses
 
+    # 이번 달 수입/지출 내역 기반 자산 증감률 계산 로직
+    # (거래내역의 월별 데이터를 기반으로 전월 대비 상승/하락률 산출)
+    if not df_trx.empty and "날짜" in df_trx.columns:
+        df_trx["날짜_dt"] = pd.to_datetime(df_trx["날짜"], errors="coerce")
+        current_month = now_dt.month
+        current_year = now_dt.year
+        
+        # 이번 달 수입 및 지출
+        this_month_trx = df_trx[(df_trx["날짜_dt"].dt.year == current_year) & (df_trx["날짜_dt"].dt.month == current_month)]
+        m_income = this_month_trx[this_month_trx["구분"] == "수입"]["금액"].sum()
+        m_expense = this_month_trx[this_month_trx["구분"] == "지출"]["금액"].sum()
+        m_net_flow = m_income - m_expense
+        
+        # 자산 대비 증감 퍼센테이지 계산 (순자산 기준 변동률)
+        growth_rate = (m_net_flow / net_worth * 100) if net_worth > 0 else 0.0
+    else:
+        m_income, m_expense, m_net_flow, growth_rate = 0, 0, 0, 0.0
+
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("💎 순자산 (자산-부채)", f"{net_worth:,.0f}원", delta=f"총자산 {total_asset:,.0f}원")
-    col2.metric("📥 누적 수입", f"{incomes:,.0f}원")
-    col3.metric("📤 누적 지출", f"{expenses:,.0f}원")
-    col4.metric("💵 현금 흐름 (수입-지출)", f"{monthly_flow:,.0f}원", delta_color="normal" if monthly_flow >= 0 else "inverse")
+    col2.metric("📈 이번 달 순현금 흐름", f"{m_net_flow:,.0f}원", delta=f"{growth_rate:+.2f}% 변동")
+    col3.metric("📥 이번 달 총 수입", f"{m_income:,.0f}원")
+    col4.metric("📤 이번 달 총 지출", f"{m_expense:,.0f}원", delta_color="inverse")
 
     st.markdown("---")
     c_left, c_right = st.columns(2)
@@ -140,42 +165,33 @@ with tab1:
 
 with tab2:
     st.header("🏠 보유 자산 및 부채(주택담보대출 등) 관리")
-    st.caption("주택, 예적금 등의 자산과 주택담보대출 잔액을 관리하세요.")
+    st.caption("표 안에서 직접 금액, 항목명, 메모를 수정하고 [💾 자산 변경사항 저장] 버튼을 누르세요. 행 추가 및 삭제도 가능합니다.")
 
-    st.dataframe(st.session_state.assets, use_container_width=True)
+    # 표 직접 수정 기능 복구 (st.data_editor)
+    edited_assets = st.data_editor(
+        st.session_state.assets.copy().reset_index(drop=True),
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "구분": st.column_config.SelectboxColumn("구분", options=["자산", "부채"], required=True),
+            "항목명": st.column_config.TextColumn("자산/부채 항목명", required=True),
+            "금액(원)": st.column_config.NumberColumn("금액 (원)", min_value=0, step=100000, format="%d원", required=True),
+            "메모": st.column_config.TextColumn("메모 또는 상세 설명"),
+        },
+        key="asset_editor_v2"
+    )
 
-    st.markdown("### ➕ 새로운 자산/부채 추가하기")
-    with st.form("add_asset_form"):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            new_type = st.selectbox("구분", ["자산", "부채"])
-        with c2:
-            new_name = st.text_input("항목명 (예: 주택담보대출 잔액, 예적금)")
-        with c3:
-            new_amt = st.number_input("금액 (원)", min_value=0, step=100000, format="%d")
-        new_memo = st.text_input("메모 (금리, 상환 방식 등)")
-        
-        submitted = st.form_submit_button("➕ 항목 추가하기")
-        if submitted and new_name:
-            new_row = pd.DataFrame([{"구분": new_type, "항목명": new_name, "금액(원)": int(new_amt), "메모": new_memo}])
-            st.session_state.assets = pd.concat([st.session_state.assets, new_row], ignore_index=True)
-            save_assets(st.session_state.assets)
-            st.success(f"'{new_name}' 항목이 추가되었습니다!")
-            st.rerun()
-
-    st.markdown("### 🗑️ 자산/부채 항목 삭제하기")
-    if not st.session_state.assets.empty:
-        asset_names = st.session_state.assets["항목명"].tolist()
-        target_to_delete = st.selectbox("삭제할 항목 선택", asset_names)
-        if st.button("🗑️ 선택한 항목 삭제", type="secondary"):
-            st.session_state.assets = st.session_state.assets[st.session_state.assets["항목명"] != target_to_delete].reset_index(drop=True)
-            save_assets(st.session_state.assets)
-            st.success(f"'{target_to_delete}' 항목이 삭제되었습니다!")
-            st.rerun()
+    if st.button("💾 자산 변경사항 저장", type="primary"):
+        clean_ast = edited_assets.dropna(subset=["항목명"]).copy()
+        clean_ast["금액(원)"] = pd.to_numeric(clean_ast["금액(원)"], errors="coerce").fillna(0).astype(int)
+        st.session_state.assets = clean_ast.reset_index(drop=True)
+        save_assets(st.session_state.assets)
+        st.success("자산 및 부채 목록이 성공적으로 저장되었습니다!")
+        st.rerun()
 
 with tab3:
     st.header("📝 거래내역, 매달 고정비 및 주택담보대출 원리금 관리")
-    st.caption("월급 같은 수입뿐만 아니라, 매달 고정으로 나가는 지출과 주택담보대출 원리금 상환 내역을 관리하세요.")
+    st.caption("월급 같은 수입, 고정지출, 주택담보대출 원리금 상환 내역을 추가하고 관리하세요.")
 
     with st.form("add_trx_form"):
         c1, c2, c3, c4 = st.columns(4)
@@ -186,9 +202,9 @@ with tab3:
         with c3:
             trx_amount = st.number_input("금액 (원)", min_value=0, step=10000, format="%d")
         with c4:
-            trx_date = st.text_input("날짜", value=pd.Timestamp.now().strftime("%Y-%m-%d"))
+            trx_date = st.text_input("날짜", value=now_dt.strftime("%Y-%m-%d"))
         
-        trx_desc = st.text_input("내용 상세 (예: XX은행 주담대 0월 원리금, 3월 관리비 등)")
+        trx_desc = st.text_input("내용 상세 (예: XX은행 주담대 원리금 납부, 3월 관리비 등)")
         
         trx_submitted = st.form_submit_button("📥 내역 장부에 추가하기")
         if trx_submitted and trx_desc:
@@ -204,15 +220,28 @@ with tab3:
             st.success("장부에 성공적으로 반영되었습니다!")
             st.rerun()
 
-    st.subheader("📋 전체 장부 목록")
-    st.dataframe(st.session_state.transactions, use_container_width=True)
+    st.subheader("📋 전체 장부 목록 (직접 편집 가능)")
+    edited_trx = st.data_editor(
+        st.session_state.transactions.copy().reset_index(drop=True),
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "날짜": st.column_config.TextColumn("날짜 (YYYY-MM-DD)"),
+            "구분": st.column_config.SelectboxColumn("구분", options=["지출", "수입"], required=True),
+            "카테고리": st.column_config.TextColumn("카테고리"),
+            "내용": st.column_config.TextColumn("내용"),
+            "금액": st.column_config.NumberColumn("금액 (원)", min_value=0, step=1000, format="%d원"),
+        },
+        key="trx_editor_v2"
+    )
 
-    if not st.session_state.transactions.empty:
-        if st.button("🗑️ 모든 장부 초기화", type="secondary"):
-            st.session_state.transactions = pd.DataFrame(columns=["날짜", "구분", "카테고리", "내용", "금액"])
-            save_transactions(st.session_state.transactions)
-            st.success("장부가 초기화되었습니다.")
-            st.rerun()
+    if st.button("💾 거래내역 수정사항 저장", type="primary"):
+        clean_trx = edited_trx.dropna(how="all").copy()
+        clean_trx["금액"] = pd.to_numeric(clean_trx["금액"], errors="coerce").fillna(0).astype(int)
+        st.session_state.transactions = clean_trx.reset_index(drop=True)
+        save_transactions(st.session_state.transactions)
+        st.success("거래내역이 저장되었습니다!")
+        st.rerun()
 
 with tab4:
     st.header("💬 AI 재무 비서 챗봇")
@@ -236,10 +265,10 @@ with tab4:
         else:
             ai_response = None
             client = genai.Client(api_key=active_key)
-            today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+            today_str = now_dt.strftime("%Y-%m-%d")
 
             asset_summary_text = st.session_state.assets.to_string(index=False) if not st.session_state.assets.empty else "자산 없음"
-            context_data = f"\n[현재 자산 및 부채 현황]\n{asset_summary_text}\n[현재 순자산: {net_worth:,.0f}원]"
+            context_data = f"\n[현재 기준일: {today_str}]\n[현재 자산 및 부채 현황]\n{asset_summary_text}\n[현재 순자산: {net_worth:,.0f}원]"
 
             system_instruction = f"""
             당신은 전문적인 AI 재무 비서입니다. 오늘 날짜는 {today_str}입니다.
