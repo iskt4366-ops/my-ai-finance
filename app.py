@@ -57,11 +57,12 @@ def save_transactions(df):
     df.to_csv(TRANS_FILE, index=False, encoding="utf-8-sig")
 
 def load_assets():
+    # 꼬인 파일을 안전하게 초기화하기 위해 파일이 존재해도 구조 검증 실패 시 재생성
     if os.path.exists(ASSET_FILE):
         try:
             df = pd.read_csv(ASSET_FILE, encoding="utf-8-sig")
             if not all(col in df.columns for col in ASSET_COLUMNS) or len(df) == 0:
-                raise Exception("Invalid format")
+                raise Exception("Reset needed")
             for col in ASSET_COLUMNS:
                 if col not in df.columns:
                     df[col] = ""
@@ -155,7 +156,7 @@ with tab2:
     st.header("🏠 보유 자산 및 부채(대출) 목록 관리")
     st.caption("부동산, 예적금, 주식 등의 자산과 주택담보대출 같은 부채를 자유롭게 추가·수정하고 순자산을 관리하세요.")
 
-    # 인덱스를 깔끔하게 재정렬한 복사본을 에디터에 전달
+    # 세션 상태의 데이터를 안전하게 복사하여 에디터에 전달
     editor_asset_df = st.session_state.assets.copy().reset_index(drop=True)
 
     edited_assets = st.data_editor(
@@ -168,7 +169,7 @@ with tab2:
             "금액(원)": st.column_config.NumberColumn("금액 (원)", min_value=0, step=100000, format="%d원", required=True),
             "메모": st.column_config.TextColumn("메모 또는 상세 설명"),
         },
-        key="asset_editor"
+        key="asset_editor_v2"
     )
 
     if st.button("💾 자산/부채 변경사항 저장", type="primary"):
@@ -232,7 +233,7 @@ with tab3:
             "내용": st.column_config.TextColumn("내용"),
             "금액": st.column_config.NumberColumn("금액 (원)", min_value=0, step=1000, format="%d원"),
         },
-        key="trx_editor"
+        key="trx_editor_v2"
     )
 
     if st.button("💾 거래내역 수정사항 저장", type="primary"):
