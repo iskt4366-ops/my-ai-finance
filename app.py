@@ -40,8 +40,11 @@ def load_transactions():
     if os.path.exists(TRANS_FILE):
         try:
             df = pd.read_csv(TRANS_FILE, encoding="utf-8-sig")
-            if "금액" in df.columns:
-                df["금액"] = pd.to_numeric(df["금액"], errors="coerce").fillna(0).astype(int)
+            df["날짜"] = df["날짜"].astype(str)
+            df["구분"] = df["구분"].astype(str)
+            df["카테고리"] = df["카테고리"].astype(str)
+            df["내용"] = df["내용"].astype(str)
+            df["금액"] = pd.to_numeric(df["금액"], errors="coerce").fillna(0).astype(int)
             return df.reset_index(drop=True)
         except:
             pass
@@ -54,8 +57,10 @@ def load_assets():
     if os.path.exists(ASSET_FILE):
         try:
             df = pd.read_csv(ASSET_FILE, encoding="utf-8-sig")
-            if "금액(원)" in df.columns:
-                df["금액(원)"] = pd.to_numeric(df["금액(원)"], errors="coerce").fillna(0).astype(int)
+            df["구분"] = df["구분"].astype(str)
+            df["항목명"] = df["항목명"].astype(str)
+            df["금액(원)"] = pd.to_numeric(df["금액(원)"], errors="coerce").fillna(0).astype(int)
+            df["메모"] = df["메모"].fillna("").astype(str)
             if len(df) > 0:
                 return df.reset_index(drop=True)
         except:
@@ -76,7 +81,6 @@ if "assets" not in st.session_state:
 if "saved_api_key" not in st.session_state:
     st.session_state.saved_api_key = load_saved_key()
 
-# 현재 날짜 기준 계산
 now_dt = datetime.now()
 current_date_str = now_dt.strftime("%Y년 %m월 %d일 (%A)")
 
@@ -120,20 +124,16 @@ with tab1:
     expenses = df_trx[df_trx["구분"] == "지출"]["금액"].sum() if not df_trx.empty and "구분" in df_trx.columns else 0
     monthly_flow = incomes - expenses
 
-    # 이번 달 수입/지출 내역 기반 자산 증감률 계산 로직
-    # (거래내역의 월별 데이터를 기반으로 전월 대비 상승/하락률 산출)
     if not df_trx.empty and "날짜" in df_trx.columns:
         df_trx["날짜_dt"] = pd.to_datetime(df_trx["날짜"], errors="coerce")
         current_month = now_dt.month
         current_year = now_dt.year
         
-        # 이번 달 수입 및 지출
         this_month_trx = df_trx[(df_trx["날짜_dt"].dt.year == current_year) & (df_trx["날짜_dt"].dt.month == current_month)]
         m_income = this_month_trx[this_month_trx["구분"] == "수입"]["금액"].sum()
         m_expense = this_month_trx[this_month_trx["구분"] == "지출"]["금액"].sum()
         m_net_flow = m_income - m_expense
         
-        # 자산 대비 증감 퍼센테이지 계산 (순자산 기준 변동률)
         growth_rate = (m_net_flow / net_worth * 100) if net_worth > 0 else 0.0
     else:
         m_income, m_expense, m_net_flow, growth_rate = 0, 0, 0, 0.0
@@ -165,11 +165,10 @@ with tab1:
 
 with tab2:
     st.header("🏠 보유 자산 및 부채(주택담보대출 등) 관리")
-    st.caption("표 안에서 직접 금액, 항목명, 메모를 수정하고 [💾 자산 변경사항 저장] 버튼을 누르세요. 행 추가 및 삭제도 가능합니다.")
+    st.caption("표 안에서 직접 금액, 항목명, 메모를 수정하고 [💾 자산 변경사항 저장] 버튼을 누르세요.")
 
-    # 표 직접 수정 기능 복구 (st.data_editor)
     edited_assets = st.data_editor(
-        st.session_state.assets.copy().reset_index(drop=True),
+        st.session_state.assets.copy(),
         num_rows="dynamic",
         use_container_width=True,
         column_config={
@@ -178,12 +177,16 @@ with tab2:
             "금액(원)": st.column_config.NumberColumn("금액 (원)", min_value=0, step=100000, format="%d원", required=True),
             "메모": st.column_config.TextColumn("메모 또는 상세 설명"),
         },
-        key="asset_editor_v2"
+        key="bulletproof_asset_editor_v3"
     )
 
     if st.button("💾 자산 변경사항 저장", type="primary"):
         clean_ast = edited_assets.dropna(subset=["항목명"]).copy()
+        clean_ast["구분"] = clean_ast["구분"].astype(str)
+        clean_ast["항목명"] = clean_ast["항목명"].astype(str)
         clean_ast["금액(원)"] = pd.to_numeric(clean_ast["금액(원)"], errors="coerce").fillna(0).astype(int)
+        clean_ast["메모"] = clean_ast["메모"].fillna("").astype(str)
+        
         st.session_state.assets = clean_ast.reset_index(drop=True)
         save_assets(st.session_state.assets)
         st.success("자산 및 부채 목록이 성공적으로 저장되었습니다!")
@@ -209,10 +212,10 @@ with tab3:
         trx_submitted = st.form_submit_button("📥 내역 장부에 추가하기")
         if trx_submitted and trx_desc:
             new_trx = pd.DataFrame([{
-                "날짜": trx_date,
-                "구분": trx_type,
-                "카테고리": trx_category,
-                "내용": trx_desc,
+                "날짜": str(trx_date),
+                "구분": str(trx_type),
+                "카테고리": str(trx_category),
+                "내용": str(trx_desc),
                 "금액": int(trx_amount)
             }])
             st.session_state.transactions = pd.concat([st.session_state.transactions, new_trx], ignore_index=True).reset_index(drop=True)
@@ -222,7 +225,7 @@ with tab3:
 
     st.subheader("📋 전체 장부 목록 (직접 편집 가능)")
     edited_trx = st.data_editor(
-        st.session_state.transactions.copy().reset_index(drop=True),
+        st.session_state.transactions.copy(),
         num_rows="dynamic",
         use_container_width=True,
         column_config={
@@ -232,100 +235,7 @@ with tab3:
             "내용": st.column_config.TextColumn("내용"),
             "금액": st.column_config.NumberColumn("금액 (원)", min_value=0, step=1000, format="%d원"),
         },
-        key="trx_editor_v2"
+        key="bulletproof_trx_editor_v3"
     )
 
-    if st.button("💾 거래내역 수정사항 저장", type="primary"):
-        clean_trx = edited_trx.dropna(how="all").copy()
-        clean_trx["금액"] = pd.to_numeric(clean_trx["금액"], errors="coerce").fillna(0).astype(int)
-        st.session_state.transactions = clean_trx.reset_index(drop=True)
-        save_transactions(st.session_state.transactions)
-        st.success("거래내역이 저장되었습니다!")
-        st.rerun()
-
-with tab4:
-    st.header("💬 AI 재무 비서 챗봇")
-    st.caption("예: '이번 달 주택담보대출 원리금 85만 원 나갔어'라고 말씀하시면 자동으로 장부에 기록되며, 재무 상담도 가능합니다.")
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if user_prompt := st.chat_input("예: '월급 400만 원 들어왔어' 또는 '내 고정비와 주담대 상환 부담이 어때?'"):
-        st.session_state.messages.append({"role": "user", "content": user_prompt})
-        with st.chat_message("user"):
-            st.markdown(user_prompt)
-
-        active_key = st.session_state.saved_api_key
-        if not active_key:
-            ai_response = "⚠️ 왼쪽 사이드바에 Gemini API Key를 먼저 입력해주세요!"
-        else:
-            ai_response = None
-            client = genai.Client(api_key=active_key)
-            today_str = now_dt.strftime("%Y-%m-%d")
-
-            asset_summary_text = st.session_state.assets.to_string(index=False) if not st.session_state.assets.empty else "자산 없음"
-            context_data = f"\n[현재 기준일: {today_str}]\n[현재 자산 및 부채 현황]\n{asset_summary_text}\n[현재 순자산: {net_worth:,.0f}원]"
-
-            system_instruction = f"""
-            당신은 전문적인 AI 재무 비서입니다. 오늘 날짜는 {today_str}입니다.
-            사용자의 입력에 지출, 수입, 대출원리금 상환 관련 내역이 있다면 친절하게 답변한 뒤,
-            답변 맨 마지막 줄에 아래 형식의 JSON 태그를 정확히 추가하세요.
-            형식: [LOG]{{"날짜": "{today_str}", "구분": "지출", "카테고리": "대출원리금상환(주담대)", "내용": "주담대 원리금 납부", "금액": 850000}}[/LOG]
-            - '구분'은 "지출", "수입" 중 하나로 분류하세요.
-            - '카테고리'는 "고정지출(통신/관리비등)", "대출원리금상환(주담대)", "식비", "급여(수입)", "기타" 중 하나로 매칭하세요.
-            - 일반 상담이나 질문일 경우 [LOG] 태그를 생략하세요.
-            {context_data}
-            """
-
-            full_prompt = f"{system_instruction}\n\n사용자 입력: {user_prompt}"
-
-            with st.spinner("🧠 AI 재무 비서가 분석 및 답변을 작성 중입니다..."):
-                for attempt in range(3):
-                    try:
-                        response = client.models.generate_content(
-                            model="gemini-3.8-flash",
-                            contents=full_prompt,
-                        )
-                        ai_response = response.text
-                        break
-                    except Exception as e:
-                        if "503" in str(e) and attempt < 2:
-                            time.sleep(2)
-                            continue
-                        else:
-                            ai_response = f"API 호출 중 오류 발생: {e}"
-
-            if ai_response and "[LOG]" in ai_response:
-                logs = re.findall(r"\[LOG\](.*?)\[/LOG\]", ai_response, re.DOTALL)
-                added_count = 0
-                new_rows = []
-                for log_str in logs:
-                    try:
-                        log_data = json.loads(log_str.strip())
-                        new_rows.append({
-                            "날짜": str(log_data.get("날짜", today_str)),
-                            "구분": str(log_data.get("구분", "지출")),
-                            "카테고리": str(log_data.get("카테고리", "기타")),
-                            "내용": str(log_data.get("내용", "내역")),
-                            "금액": int(log_data.get("금액", 0))
-                        })
-                        added_count += 1
-                    except:
-                        pass
-
-                if new_rows:
-                    new_df = pd.DataFrame(new_rows)
-                    st.session_state.transactions = pd.concat([st.session_state.transactions, new_df], ignore_index=True).reset_index(drop=True)
-                    save_transactions(st.session_state.transactions)
-
-                ai_response = re.sub(r"\[LOG\].*?\[/LOG\]", "", ai_response, flags=re.DOTALL).strip()
-                if added_count > 0:
-                    ai_response += f"\n\n✅ **({added_count}건의 내역이 고정비/대출 장부에 자동 반영되었습니다!)**"
-
-        with st.chat_message("assistant"):
-            st.markdown(ai_response)
-        st.session_state.messages.append({"role": "assistant", "content": ai_response})
+    if st.button("💾 거래내역 수정사항 저장", type
