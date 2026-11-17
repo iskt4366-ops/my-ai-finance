@@ -11,9 +11,6 @@ CONFIG_FILE = "api_config.json"
 TRANS_FILE = "finance_data.csv"
 ASSET_FILE = "asset_data.csv"
 
-TRANS_COLUMNS = ["날짜", "구분", "카테고리", "내용", "금액"]
-ASSET_COLUMNS = ["구분", "항목명", "금액(원)", "메모"]
-
 DEFAULT_ASSETS = [
     {"구분": "자산", "항목명": "비상금 통장 / 현금", "금액(원)": 5000000, "메모": "CMA 및 입출금 통장"},
     {"구분": "자산", "항목명": "주택 및 부동산", "금액(원)": 500000000, "메모": "서울 자택 (공동명의)"},
@@ -41,24 +38,29 @@ def load_transactions():
     if os.path.exists(TRANS_FILE):
         try:
             df = pd.read_csv(TRANS_FILE, encoding="utf-8-sig")
-            for col in TRANS_COLUMNS:
-                if col not in df.columns:
-                    df[col] = ""
-            df["금액"] = pd.to_numeric(df["금액"], errors="coerce").fillna(0).astype(int)
-            return df[TRANS_COLUMNS].reset_index(drop=True)
+            return df.to_dict(orient="records")
         except:
-            return pd.DataFrame(columns=TRANS_COLUMNS)
-    return pd.DataFrame(columns=TRANS_COLUMNS)
+            return []
+    return []
 
-def save_transactions(df):
+def save_transactions(data_list):
+    df = pd.DataFrame(data_list)
     df.to_csv(TRANS_FILE, index=False, encoding="utf-8-sig")
 
 def load_assets():
-    df_default = pd.DataFrame(DEFAULT_ASSETS)
-    df_default.to_csv(ASSET_FILE, index=False, encoding="utf-8-sig")
-    return df_default.reset_index(drop=True)
+    if os.path.exists(ASSET_FILE):
+        try:
+            df = pd.read_csv(ASSET_FILE, encoding="utf-8-sig")
+            if len(df) == 0:
+                raise Exception()
+            return df.to_dict(orient="records")
+        except:
+            return DEFAULT_ASSETS
+    else:
+        return DEFAULT_ASSETS
 
-def save_assets(df):
+def save_assets(data_list):
+    df = pd.DataFrame(data_list)
     df.to_csv(ASSET_FILE, index=False, encoding="utf-8-sig")
 
 if "transactions" not in st.session_state:
@@ -86,9 +88,9 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("💡 나의 재무 건전성")
     
-    df_ast = st.session_state.assets
-    total_asset = df_ast[df_ast["구분"] == "자산"]["금액(원)"].sum() if not df_ast.empty else 0
-    total_debt = df_ast[df_ast["구분"] == "부채"]["금액(원)"].sum() if not df_ast.empty else 0
+    df_ast = pd.DataFrame(st.session_state.assets)
+    total_asset = df_ast[df_ast["구분"] == "자산"]["금액(원)"].astype(float).sum() if not df_ast.empty and "구분" in df_ast.columns else 0
+    total_debt = df_ast[df_ast["구분"] == "부채"]["금액(원)"].astype(float).sum() if not df_ast.empty and "구분" in df_ast.columns else 0
     net_worth = total_asset - total_debt
     
     st.metric("총 순자산", f"{net_worth:,.0f}원")
@@ -103,9 +105,9 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 종합 대시보드", "🏠 자산·부�
 with tab1:
     st.header("📊 나의 재정 상태 종합 요약")
     
-    df_trx = st.session_state.transactions
-    incomes = df_trx[df_trx["구분"] == "수입"]["금액"].sum() if not df_trx.empty else 0
-    expenses = df_trx[df_trx["구분"] == "지출"]["금액"].sum() if not df_trx.empty else 0
+    df_trx = pd.DataFrame(st.session_state.transactions)
+    incomes = df_trx[df_trx["구분"] == "수입"]["금액"].astype(float).sum() if not df_trx.empty and "구분" in df_trx.columns else 0
+    expenses = df_trx[df_trx["구분"] == "지출"]["금액"].astype(float).sum() if not df_trx.empty and "구분" in df_trx.columns else 0
     monthly_flow = incomes - expenses
 
     col1, col2, col3, col4 = st.columns(4)
@@ -119,17 +121,17 @@ with tab1:
     
     with c_left:
         st.subheader("🏠 자산 구성 현황")
-        if not df_ast.empty and not df_ast[df_ast["구분"] == "자산"].empty:
-            asset_summary = df_ast[df_ast["구분"] == "자산"].set_index("항목명")["금액(원)"]
-            st.bar_chart(asset_summary)
+        if not df_ast.empty and "구분" in df_ast.columns and not df_ast[df_ast["구분"] == "자산"].empty:
+            sub_df = df_ast[df_ast["구분"] == "자산"]
+            st.bar_chart(sub_df.set_index("항목명")["금액(원)"].astype(float))
         else:
             st.info("등록된 자산 항목이 없습니다.")
 
     with c_right:
         st.subheader("🛒 카테고리별 지출 분석")
-        if not df_trx.empty and not df_trx[df_trx["구분"] == "지출"].empty:
-            exp_summary = df_trx[df_trx["구분"] == "지출"].groupby("카테고리")["금액"].sum()
-            st.bar_chart(exp_summary)
+        if not df_trx.empty and "구분" in df_trx.columns and not df_trx[df_trx["구분"] == "지출"].empty:
+            sub_trx = df_trx[df_trx["구분"] == "지출"]
+            st.bar_chart(sub_trx.groupby("카테고리")["금액"].sum().astype(float))
         else:
             st.info("기록된 지출 내역이 없습니다.")
 
@@ -137,26 +139,31 @@ with tab2:
     st.header("🏠 보유 자산 및 부채(대출) 목록 관리")
     st.caption("부동산, 예적금, 주식 등의 자산과 주택담보대출 같은 부채를 자유롭게 추가·수정하고 순자산을 관리하세요.")
 
-    editor_asset_df = st.session_state.assets.copy().reset_index(drop=True)
-
     edited_assets = st.data_editor(
-        editor_asset_df,
+        st.session_state.assets,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
             "구분": st.column_config.SelectboxColumn("구분", options=["자산", "부채"], required=True),
-            "항목명": st.column_config.TextColumn("자산/부채 항목명 (예: 주택, 주식, 주담대)", required=True),
+            "항목명": st.column_config.TextColumn("자산/부채 항목명", required=True),
             "금액(원)": st.column_config.NumberColumn("금액 (원)", min_value=0, step=100000, format="%d원", required=True),
             "메모": st.column_config.TextColumn("메모 또는 상세 설명"),
         },
-        key="fresh_asset_editor_v1"
+        key="stable_asset_editor"
     )
 
     if st.button("💾 자산/부채 변경사항 저장", type="primary"):
-        clean_ast = edited_assets.dropna(subset=["항목명"]).copy()
-        clean_ast["금액(원)"] = pd.to_numeric(clean_ast["금액(원)"], errors="coerce").fillna(0).astype(int)
-        st.session_state.assets = clean_ast.reset_index(drop=True)
-        save_assets(st.session_state.assets)
+        cleaned = []
+        for row in edited_assets:
+            if row.get("항목명"):
+                cleaned.append({
+                    "구분": str(row.get("구분", "자산")),
+                    "항목명": str(row.get("항목명", "")),
+                    "금액(원)": int(row.get("금액(원)", 0)),
+                    "메모": str(row.get("메모", ""))
+                })
+        st.session_state.assets = cleaned
+        save_assets(cleaned)
         st.success("자산 및 부채 목록이 안전하게 저장되었습니다!")
         st.rerun()
 
@@ -184,26 +191,30 @@ with tab3:
                 default_cat = st.text_input("일괄 카테고리", value="명세서일괄")
 
                 if st.button("📥 거래내역 장부에 병합하기", type="primary"):
-                    mapped_df = pd.DataFrame()
-                    mapped_df["날짜"] = pd.Timestamp.now().strftime("%Y-%m-%d") if date_col == "오늘 날짜로 일괄 적용" else raw_df[date_col].astype(str).str[:10]
-                    mapped_df["구분"] = default_type
-                    mapped_df["카테고리"] = default_cat
-                    mapped_df["내용"] = raw_df[desc_col].astype(str)
-                    cleaned_amt = raw_df[amt_col].astype(str).str.replace(r"[^0-9\-]", "", regex=True)
-                    mapped_df["금액"] = pd.to_numeric(cleaned_amt, errors="coerce").fillna(0).abs().astype(int)
-
-                    st.session_state.transactions = pd.concat([st.session_state.transactions, mapped_df], ignore_index=True).reset_index(drop=True)
-                    save_transactions(st.session_state.transactions)
+                    new_list = list(st.session_state.transactions)
+                    for _, r in raw_df.iterrows():
+                        dt = pd.Timestamp.now().strftime("%Y-%m-%d") if date_col == "오늘 날짜로 일괄 적용" else str(r[date_col])[:10]
+                        desc = str(r[desc_col])
+                        raw_amt = str(r[amt_col])
+                        clean_amt = int(''.join(filter(str.isdigit, raw_amt.replace('-', ''))) or 0)
+                        
+                        new_list.append({
+                            "날짜": dt,
+                            "구분": default_type,
+                            "카테고리": default_cat,
+                            "내용": desc,
+                            "금액": clean_amt
+                        })
+                    st.session_state.transactions = new_list
+                    save_transactions(new_list)
                     st.success("내역이 장부에 성공적으로 반영되었습니다!")
                     st.rerun()
             except Exception as e:
                 st.error(f"오류 발생: {e}")
 
     st.subheader("✏️ 장부 직접 편집 및 관리")
-    editor_trx_df = st.session_state.transactions.copy().reset_index(drop=True)
-
     edited_trx = st.data_editor(
-        editor_trx_df,
+        st.session_state.transactions,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
@@ -213,14 +224,22 @@ with tab3:
             "내용": st.column_config.TextColumn("내용"),
             "금액": st.column_config.NumberColumn("금액 (원)", min_value=0, step=1000, format="%d원"),
         },
-        key="fresh_trx_editor_v1"
+        key="stable_trx_editor"
     )
 
     if st.button("💾 거래내역 수정사항 저장", type="primary"):
-        clean_trx = edited_trx.dropna(how="all").copy()
-        clean_trx["금액"] = pd.to_numeric(clean_trx["금액"], errors="coerce").fillna(0).astype(int)
-        st.session_state.transactions = clean_trx.reset_index(drop=True)
-        save_transactions(st.session_state.transactions)
+        cleaned_trx = []
+        for row in edited_trx:
+            if row.get("내용") or row.get("금액"):
+                cleaned_trx.append({
+                    "날짜": str(row.get("날짜", "")),
+                    "구분": str(row.get("구분", "지출")),
+                    "카테고리": str(row.get("카테고리", "기타")),
+                    "내용": str(row.get("내용", "")),
+                    "금액": int(row.get("금액", 0))
+                })
+        st.session_state.transactions = cleaned_trx
+        save_transactions(cleaned_trx)
         st.success("거래내역이 저장되었습니다!")
         st.rerun()
 
@@ -248,7 +267,7 @@ with tab4:
             client = genai.Client(api_key=active_key)
             today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
 
-            asset_summary_text = st.session_state.assets.to_string(index=False) if not st.session_state.assets.empty else "자산 없음"
+            asset_summary_text = pd.DataFrame(st.session_state.assets).to_string(index=False) if st.session_state.assets else "자산 없음"
             context_data = f"\n[현재 자산 및 부채 현황]\n{asset_summary_text}\n[현재 순자산: {net_worth:,.0f}원]"
 
             system_instruction = f"""
@@ -282,26 +301,24 @@ with tab4:
                 import re
                 logs = re.findall(r"\[LOG\](.*?)\[/LOG\]", ai_response, re.DOTALL)
                 added_count = 0
-                new_rows = []
+                new_list = list(st.session_state.transactions)
                 for log_str in logs:
                     try:
                         log_data = json.loads(log_str.strip())
-                        new_rows.append({
-                            "날짜": log_data.get("날짜", today_str),
-                            "구분": log_data.get("구분", "지출"),
-                            "카테고리": log_data.get("카테고리", "기타"),
-                            "내용": log_data.get("내용", "내역"),
+                        new_list.append({
+                            "날짜": str(log_data.get("날짜", today_str)),
+                            "구분": str(log_data.get("구분", "지출")),
+                            "카테고리": str(log_data.get("카테고리", "기타")),
+                            "내용": str(log_data.get("내용", "내역")),
                             "금액": int(log_data.get("금액", 0))
                         })
                         added_count += 1
                     except:
                         pass
 
-                if new_rows:
-                    st.session_state.transactions = pd.concat(
-                        [st.session_state.transactions, pd.DataFrame(new_rows)], ignore_index=True
-                    ).reset_index(drop=True)
-                    save_transactions(st.session_state.transactions)
+                if added_count > 0:
+                    st.session_state.transactions = new_list
+                    save_transactions(new_list)
 
                 ai_response = re.sub(r"\[LOG\].*?\[/LOG\]", "", ai_response, flags=re.DOTALL).strip()
                 if added_count > 0:
