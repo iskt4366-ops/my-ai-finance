@@ -60,13 +60,18 @@ def load_assets():
     if os.path.exists(ASSET_FILE):
         try:
             df = pd.read_csv(ASSET_FILE, encoding="utf-8-sig")
+            # 컬럼이 맞지 않거나 비어있으면 기본값으로 리셋
+            if not all(col in df.columns for col in ASSET_COLUMNS) or len(df) == 0:
+                raise Exception("Invalid format")
             for col in ASSET_COLUMNS:
                 if col not in df.columns:
                     df[col] = ""
             df["금액(원)"] = pd.to_numeric(df["금액(원)"], errors="coerce").fillna(0).astype(int)
             return df[ASSET_COLUMNS].reset_index(drop=True)
         except:
-            return pd.DataFrame(DEFAULT_ASSETS).reset_index(drop=True)
+            df_default = pd.DataFrame(DEFAULT_ASSETS)
+            df_default.to_csv(ASSET_FILE, index=False, encoding="utf-8-sig")
+            return df_default.reset_index(drop=True)
     else:
         df_default = pd.DataFrame(DEFAULT_ASSETS)
         df_default.to_csv(ASSET_FILE, index=False, encoding="utf-8-sig")
@@ -219,4 +224,104 @@ with tab3:
         column_config={
             "날짜": st.column_config.TextColumn("날짜 (YYYY-MM-DD)"),
             "구분": st.column_config.SelectboxColumn("구분", options=["지출", "수입", "대출"], required=True),
-            "카테고리": st.column_config.
+            "카테고리": st.column_config.TextColumn("카테고리"),
+            "내용": st.column_config.TextColumn("내용"),
+            "금액": st.column_config.NumberColumn("금액 (원)", min_value=0, step=1000, format="%d원"),
+        },
+        key="trx_editor"
+    )
+
+    if st.button("💾 거래내역 수정사항 저장", type="primary"):
+        clean_trx = edited_trx.dropna(how="all").copy()
+        clean_trx["금액"] = pd.to_numeric(clean_trx["금액"], errors="coerce").fillna(0).astype(int)
+        st.session_state.transactions = clean_trx.reset_index(drop=True)
+        save_transactions(st.session_state.transactions)
+        st.success("거래내역이 저장되었습니다!")
+        st.rerun()
+
+with tab4:
+    st.header("💬 AI 재무 비서 챗봇")
+    st.caption("일상 대화처럼 지출이나 수입을 말씀하시면 장부에 자동 기록되며, 재무 상담도 가능합니다.")
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if user_prompt := st.chat_input("예: '오늘 점심값으로 1만 3천 원 썼어' 또는 '내 자산 구조에 대해 조언해줘'"):
+        st.session_state.messages.append({"role": "user", "content": user_prompt})
+        with st.chat_message("user"):
+            st.markdown(user_prompt)
+
+        active_key = st.session_state.saved_api_key
+        if not active_key:
+            ai_response = "⚠️ 왼쪽 사이드바에 Gemini API Key를 먼저 입력해주세요!"
+        else:
+            ai_response = None
+            client = genai.Client(api_key=active_key)
+            today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+
+            asset_summary_text = st.session_state.assets.to_string(index=False) if not st.session_state.assets.empty else "자산 없음"
+            context_data = f"\n[현재 자산 및 부채 현황]\n{asset_summary_text}\n[현재 순자산: {net_worth:,.0f}원]"
+
+            system_instruction = f"""
+            당신은 전문적인 AI 재무 비서입니다. 오늘 날짜는 {today_str}입니다.
+            사용자의 입력에 지출, 수입, 대출 관련 내역이 있다면 친절하게 답변한 뒤,
+            답변 맨 마지막 줄에 아래 형식의 JSON 태그를 정확히 추가하세요.
+            형식: [LOG]{{"날짜": "{today_str}", "구분": "지출", "카테고리": "식비", "내용": "점심식사", "금액": 13000}}[/LOG]
+            - '구분'은 "지출", "수입", "대출" 중 하나로 분류하세요.
+            - 일반 상담이나 질문일 경우 [LOG] 태그를 생략하세요.
+            {context_data}
+            """
+
+            full_prompt = f"{system_instruction}\n\n사용자 입력: {user_prompt}"
+
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-3.8-flash",
+                        contents=full_prompt,
+                    )
+                    ai_response = response.text
+                    break
+                except Exception as e:
+                    if "503" in str(e) and attempt < 2:
+                        time.sleep(2)
+                        continue
+                    else:
+                        ai_response = f"API 호출 중 오류 발생: {e}"
+
+            if ai_response and "[LOG]" in ai_response:
+                import re
+                logs = re.findall(r"\[LOG\](.*?)\[/LOG\]", ai_response, re.DOTALL)
+                added_count = 0
+                new_rows = []
+                for log_str in logs:
+                    try:
+                        log_data = json.loads(log_str.strip())
+                        new_rows.append({
+                            "날짜": log_data.get("날짜", today_str),
+                            "구분": log_data.get("구분", "지출"),
+                            "카테고리": log_data.get("카테고리", "기타"),
+                            "내용": log_data.get("내용", "내역"),
+                            "금액": int(log_data.get("금액", 0))
+                        })
+                        added_count += 1
+                    except:
+                        pass
+
+                if new_rows:
+                    st.session_state.transactions = pd.concat(
+                        [st.session_state.transactions, pd.DataFrame(new_rows)], ignore_index=True
+                    ).reset_index(drop=True)
+                    save_transactions(st.session_state.transactions)
+
+                ai_response = re.sub(r"\[LOG\].*?\[/LOG\]", "", ai_response, flags=re.DOTALL).strip()
+                if added_count > 0:
+                    ai_response += f"\n\n✅ **({added_count}건의 내역이 거래내역 장부에 자동 반영되었습니다!)**"
+
+        with st.chat_message("assistant"):
+            st.markdown(ai_response)
+        st.session_state.messages.append({"role": "assistant", "content": ai_response})
