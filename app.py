@@ -17,7 +17,7 @@ ASSET_FILE = "asset_data.csv"
 TRANS_COLUMNS = ["날짜", "구분", "카테고리", "내용", "금액"]
 ASSET_COLUMNS = ["구분", "항목명", "금액(원)", "메모"]
 
-# 기본 자산 샘플 데이터 (처음 실행 시 생성)
+# 기본 자산 샘플 데이터
 DEFAULT_ASSETS = [
     {"구분": "자산", "항목명": "비상금 통장 / 현금", "금액(원)": 5000000, "메모": "CMA 및 입출금 통장"},
     {"구분": "자산", "항목명": "주택 및 부동산", "금액(원)": 500000000, "메모": "서울 자택 (공동명의)"},
@@ -59,14 +59,14 @@ def load_transactions():
 def save_transactions(df):
     df.to_csv(TRANS_FILE, index=False, encoding="utf-8-sig")
 
-# 3. 자산/부채 목록 로드/저장 함수
+# 3. 자산/부채 목록 로드/저장 함수 (안전 장치 강화)
 def load_assets():
     if os.path.exists(ASSET_FILE):
         try:
             df = pd.read_csv(ASSET_FILE, encoding="utf-8-sig")
             for col in ASSET_COLUMNS:
                 if col not in df.columns:
-                    df["메모"] = ""
+                    df[col] = ""
             df["금액(원)"] = pd.to_numeric(df["금액(원)"], errors="coerce").fillna(0).astype(int)
             return df[ASSET_COLUMNS]
         except:
@@ -108,7 +108,6 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("💡 나의 재무 건전성")
     
-    # 계산 로직
     df_ast = st.session_state.assets
     total_asset = df_ast[df_ast["구분"] == "자산"]["금액(원)"].sum() if not df_ast.empty else 0
     total_debt = df_ast[df_ast["구분"] == "부채"]["금액(원)"].sum() if not df_ast.empty else 0
@@ -189,7 +188,7 @@ with tab2:
         st.rerun()
 
 # ==========================================
-# TAB 3: 거래내역 관리 (명세서 업로드 및 직접 수정)
+# TAB 3: 거래내역 관리
 # ==========================================
 with tab3:
     st.header("📝 거래내역 (수입·지출·대출상환) 관리")
@@ -280,7 +279,6 @@ with tab4:
             client = genai.Client(api_key=active_key)
             today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
 
-            # 현재 자산 상태 및 최근 거래 요약 전달
             asset_summary_text = st.session_state.assets.to_string(index=False) if not st.session_state.assets.empty else "자산 없음"
             context_data = f"\n[현재 자산 및 부채 현황]\n{asset_summary_text}\n[현재 순자산: {net_worth:,.0f}원]"
 
