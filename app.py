@@ -15,7 +15,7 @@ DEFAULT_ASSETS = [
     {"구분": "자산", "항목명": "비상금 통장 / 현금", "금액(원)": 5000000, "메모": "CMA 및 입출금 통장"},
     {"구분": "자산", "항목명": "주택 및 부동산", "금액(원)": 500000000, "메모": "서울 자택 (공동명의)"},
     {"구분": "자산", "항목명": "주식 및 투자 계좌", "금액(원)": 30000000, "메모": "국내외 주식 및 ETF"},
-    {"구분": "부채", "항목명": "주택담보대출", "금액(원)": 200000000, "메모": "보금자리론 / 디딤돌 등"},
+    {"구분": "부채", "항목명": "주택담보대출", "금액(원)": 200000000, "메모": "보금자리론 / 주담대 원리금 상환 중"},
 ]
 
 def load_saved_key():
@@ -100,9 +100,9 @@ with st.sidebar:
     st.metric("총 부채", f"{total_debt:,.0f}원")
 
 st.title("💰 나만의 AI 재무 비서 & 자산 관리 시스템")
-st.write("자산 목록, 부채, 수입/지출 내역을 통합 관리하고 AI와 대화하며 재정을 설계하세요.")
+st.write("자산 목록, 고정비, 주택담보대출 원리금, 수입/지출 내역을 통합 관리하고 AI와 대화하세요.")
 
-tab1, tab2, tab3, tab4 = st.tabs(["📊 종합 대시보드", "🏠 자산·부채 관리", "📝 거래내역 관리", "💬 AI 재무 챗봇"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 종합 대시보드", "🏠 자산·부채 관리", "📝 거래내역 & 고정비 관리", "💬 AI 재무 챗봇"])
 
 with tab1:
     st.header("📊 나의 재정 상태 종합 요약")
@@ -130,7 +130,7 @@ with tab1:
             st.info("등록된 자산 항목이 없습니다.")
 
     with c_right:
-        st.subheader("🛒 카테고리별 지출 분석")
+        st.subheader("🛒 카테고리별 지출 분석 (고정비·대출 포함)")
         if not df_trx.empty and "구분" in df_trx.columns and not df_trx[df_trx["구분"] == "지출"].empty:
             sub_trx = df_trx[df_trx["구분"] == "지출"]
             st.bar_chart(sub_trx.groupby("카테고리")["금액"].sum())
@@ -138,10 +138,9 @@ with tab1:
             st.info("기록된 지출 내역이 없습니다.")
 
 with tab2:
-    st.header("🏠 보유 자산 및 부채(대출) 목록 관리")
-    st.caption("등록된 자산과 부채 목록을 확인하고, 항목을 추가하거나 삭제할 수 있습니다.")
+    st.header("🏠 보유 자산 및 부채(주택담보대출 등) 관리")
+    st.caption("주택, 예적금 등의 자산과 주택담보대출 잔액을 관리하세요.")
 
-    # 현재 등록된 자산 목록 안전하게 표로 출력
     st.dataframe(st.session_state.assets, use_container_width=True)
 
     st.markdown("### ➕ 새로운 자산/부채 추가하기")
@@ -150,10 +149,10 @@ with tab2:
         with c1:
             new_type = st.selectbox("구분", ["자산", "부채"])
         with c2:
-            new_name = st.text_input("항목명 (예: 예금, 주식, 대출)")
+            new_name = st.text_input("항목명 (예: 주택담보대출 잔액, 예적금)")
         with c3:
             new_amt = st.number_input("금액 (원)", min_value=0, step=100000, format="%d")
-        new_memo = st.text_input("메모 (선택사항)")
+        new_memo = st.text_input("메모 (금리, 상환 방식 등)")
         
         submitted = st.form_submit_button("➕ 항목 추가하기")
         if submitted and new_name:
@@ -174,64 +173,50 @@ with tab2:
             st.rerun()
 
 with tab3:
-    st.header("📝 거래내역 (수입·지출·대출상환) 관리")
-    
-    with st.expander("📁 은행/카드사 명세서 파일(CSV, Excel) 일괄 업로드하기"):
-        uploaded_file = st.file_uploader("명세서 파일을 업로드하세요", type=["csv", "xlsx"])
-        if uploaded_file is not None:
-            try:
-                raw_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
-                st.success(f"'{uploaded_file.name}' 로드 성공! ({len(raw_df)}건)")
-                cols = raw_df.columns.tolist()
-                
-                col_a, col_b, col_c, col_d = st.columns(4)
-                with col_a:
-                    date_col = st.selectbox("날짜 열", ["오늘 날짜로 일괄 적용"] + cols)
-                with col_b:
-                    desc_col = st.selectbox("내용(적요) 열", cols)
-                with col_c:
-                    amt_col = st.selectbox("금액 열", cols)
-                with col_d:
-                    default_type = st.selectbox("기본 구분", ["지출", "수입", "대출"])
+    st.header("📝 거래내역, 매달 고정비 및 주택담보대출 원리금 관리")
+    st.caption("월급 같은 수입뿐만 아니라, 매달 고정으로 나가는 지출과 주택담보대출 원리금 상환 내역을 관리하세요.")
 
-                default_cat = st.text_input("일괄 카테고리", value="명세서일괄")
+    with st.form("add_trx_form"):
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            trx_type = st.selectbox("구분", ["지출", "수입"])
+        with c2:
+            # 고정비 및 주담대 원리금 관리를 위한 카테고리 추천 제공
+            trx_category = st.selectbox("카테고리", ["고정지출(통신/관리비등)", "대출원리금상환(주담대)", "식비", "급여(수입)", "기타"])
+        with c3:
+            trx_amount = st.number_input("금액 (원)", min_value=0, step=10000, format="%d")
+        with c4:
+            trx_date = st.text_input("날짜", value=pd.Timestamp.now().strftime("%Y-%m-%d"))
+        
+        trx_desc = st.text_input("내용 상세 (예: XX은행 주담대 0월 원리금, 3월 관리비 등)")
+        
+        trx_submitted = st.form_submit_button("📥 내역 장부에 추가하기")
+        if trx_submitted and trx_desc:
+            new_trx = pd.DataFrame([{
+                "날짜": trx_date,
+                "구분": trx_type,
+                "카테고리": trx_category,
+                "내용": trx_desc,
+                "금액": int(trx_amount)
+            }])
+            st.session_state.transactions = pd.concat([st.session_state.transactions, new_trx], ignore_index=True).reset_index(drop=True)
+            save_transactions(st.session_state.transactions)
+            st.success("장부에 성공적으로 반영되었습니다!")
+            st.rerun()
 
-                if st.button("📥 거래내역 장부에 병합하기", type="primary"):
-                    mapped_rows = []
-                    for _, r in raw_df.iterrows():
-                        dt = pd.Timestamp.now().strftime("%Y-%m-%d") if date_col == "오늘 날짜로 일괄 적용" else str(r[date_col])[:10]
-                        desc = str(r[desc_col])
-                        raw_amt = str(r[amt_col])
-                        clean_amt = int(''.join(filter(str.isdigit, raw_amt.replace('-', ''))) or 0)
-                        
-                        mapped_rows.append({
-                            "날짜": dt,
-                            "구분": default_type,
-                            "카테고리": default_cat,
-                            "내용": desc,
-                            "금액": clean_amt
-                        })
-                    new_df = pd.DataFrame(mapped_rows)
-                    st.session_state.transactions = pd.concat([st.session_state.transactions, new_df], ignore_index=True).reset_index(drop=True)
-                    save_transactions(st.session_state.transactions)
-                    st.success("내역이 장부에 성공적으로 반영되었습니다!")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"오류 발생: {e}")
-
-    st.subheader("📋 전체 거래내역 장부")
+    st.subheader("📋 전체 장부 목록")
     st.dataframe(st.session_state.transactions, use_container_width=True)
 
     if not st.session_state.transactions.empty:
-        if st.button("🗑️ 모든 거래내역 초기화(삭제)", type="secondary"):
+        if st.button("🗑️ 모든 장부 초기화", type="secondary"):
             st.session_state.transactions = pd.DataFrame(columns=["날짜", "구분", "카테고리", "내용", "금액"])
             save_transactions(st.session_state.transactions)
-            st.success("거래내역이 초기화되었습니다.")
+            st.success("장부가 초기화되었습니다.")
             st.rerun()
 
 with tab4:
     st.header("💬 AI 재무 비서 챗봇")
-    st.caption("일상 대화처럼 지출이나 수입을 말씀하시면 장부에 자동 기록되며, 재무 상담도 가능합니다.")
+    st.caption("예: '이번 달 주택담보대출 원리금 85만 원 나갔어'라고 말씀하시면 자동으로 장부에 기록되며, 재무 상담도 가능합니다.")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -240,7 +225,7 @@ with tab4:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if user_prompt := st.chat_input("예: '오늘 점심값으로 1만 3천 원 썼어' 또는 '내 자산 구조에 대해 조언해줘'"):
+    if user_prompt := st.chat_input("예: '월급 400만 원 들어왔어' 또는 '내 고정비와 주담대 상환 부담이 어때?'"):
         st.session_state.messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
             st.markdown(user_prompt)
@@ -258,30 +243,33 @@ with tab4:
 
             system_instruction = f"""
             당신은 전문적인 AI 재무 비서입니다. 오늘 날짜는 {today_str}입니다.
-            사용자의 입력에 지출, 수입, 대출 관련 내역이 있다면 친절하게 답변한 뒤,
+            사용자의 입력에 지출, 수입, 대출원리금 상환 관련 내역이 있다면 친절하게 답변한 뒤,
             답변 맨 마지막 줄에 아래 형식의 JSON 태그를 정확히 추가하세요.
-            형식: [LOG]{{"날짜": "{today_str}", "구분": "지출", "카테고리": "식비", "내용": "점심식사", "금액": 13000}}[/LOG]
-            - '구분'은 "지출", "수입", "대출" 중 하나로 분류하세요.
+            형식: [LOG]{{"날짜": "{today_str}", "구분": "지출", "카테고리": "대출원리금상환(주담대)", "내용": "주담대 원리금 납부", "금액": 850000}}[/LOG]
+            - '구분'은 "지출", "수입" 중 하나로 분류하세요.
+            - '카테고리'는 "고정지출(통신/관리비등)", "대출원리금상환(주담대)", "식비", "급여(수입)", "기타" 중 하나로 매칭하세요.
             - 일반 상담이나 질문일 경우 [LOG] 태그를 생략하세요.
             {context_data}
             """
 
             full_prompt = f"{system_instruction}\n\n사용자 입력: {user_prompt}"
 
-            for attempt in range(3):
-                try:
-                    response = client.models.generate_content(
-                        model="gemini-3.8-flash",
-                        contents=full_prompt,
-                    )
-                    ai_response = response.text
-                    break
-                except Exception as e:
-                    if "503" in str(e) and attempt < 2:
-                        time.sleep(2)
-                        continue
-                    else:
-                        ai_response = f"API 호출 중 오류 발생: {e}"
+            # 로딩바(Spinner)를 적용하여 체감 속도 및 안정성 개선
+            with st.spinner("🧠 AI 재무 비서가 분석 및 답변을 작성 중입니다..."):
+                for attempt in range(3):
+                    try:
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=full_prompt,
+                        )
+                        ai_response = response.text
+                        break
+                    except Exception as e:
+                        if "503" in str(e) and attempt < 2:
+                            time.sleep(2)
+                            continue
+                        else:
+                            ai_response = f"API 호출 중 오류 발생: {e}"
 
             if ai_response and "[LOG]" in ai_response:
                 import re
@@ -307,9 +295,10 @@ with tab4:
                     st.session_state.transactions = pd.concat([st.session_state.transactions, new_df], ignore_index=True).reset_index(drop=True)
                     save_transactions(st.session_state.transactions)
 
+                ai_response = re.sub(r"\[LOG\].*?\[/LOG\]", "", ai_response, flags=root_flag := re.DOTALL).strip() if 're' in globals() else ai_response
                 ai_response = re.sub(r"\[LOG\].*?\[/LOG\]", "", ai_response, flags=re.DOTALL).strip()
                 if added_count > 0:
-                    ai_response += f"\n\n✅ **({added_count}건의 내역이 거래내역 장부에 자동 반영되었습니다!)**"
+                    ai_response += f"\n\n✅ **({added_count}건의 내역이 고정비/대출 장부에 자동 반영되었습니다!)**"
 
         with st.chat_message("assistant"):
             st.markdown(ai_response)
